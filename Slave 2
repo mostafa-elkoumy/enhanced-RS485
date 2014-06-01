@@ -1,0 +1,304 @@
+/*
+ * RS485_3.c
+ *
+ * Created: 29/11/2013 08:10:52 م
+ *  Author: Mostafa El-koumy
+    E-mail: Mostafa.elkoumy@gmail.com
+    LinkedIn: http://eg.linkedin.com/in/elkoumy/
+ */ 
+
+#define F_CPU 8000000UL      //XTAL=8MHZ 
+#ifdef F_CPU
+#undef F_CPU
+#define F_CPU 8000000UL      //XTAL=8MHZ 
+#endif
+#define SIZE 9
+char rs485_frame_re1[SIZE];
+
+#include <avr/io.h>
+#include <util/delay.h>
+ #include <avr/interrupt.h>
+  
+  #define LCD_port PORTB   // LCD DATA PORT
+  #define LCD_DDR DDRB    // LCD DATA DDR
+  #define LCD_PIN PINB    // LCD DATA PIN
+  #define LCD_RS 0        // LCD RS
+  #define LCD_RW 1       // LCD R/W
+  #define LCD_EN 2       // LCD ENABLE
+
+
+/************************************************************************/
+/*                          USART MODULE                                */
+/************************************************************************/
+void usart_init(const long baud_rate, const long Freq )
+{
+unsigned int ubrr_value;
+ubrr_value=((Freq / ( baud_rate* 16)) - 1);
+UCSRB |= (1<<RXEN)|(1<<TXEN);
+UCSRC |= (1<<UCSZ1)|(1<<UCSZ0);
+UBRRL=ubrr_value;
+UBRRH=(ubrr_value>>8);
+}
+void usart_send_byte (unsigned char data)
+{
+while(!(UCSRA & (1<<UDRE)));
+UDR=data;
+}
+unsigned char usart_recieve_byte(void)
+{
+while ( !(UCSRA & (1<<RXC)) );     // waits until new data(1<<RXC)
+return UDR;
+}
+void send_str (char *str)
+{
+    
+    while(*str!='\0')
+	{
+		usart_send_byte(*str);
+		str++;
+	}
+
+}
+
+char usart_real_read(void)
+  {
+   if( !(UCSRA & (1<<RXC)) )
+       {
+                 return 0;
+                }
+   else{
+        return UDR;
+        }
+  }
+
+/****************************************/
+unsigned char usart_real_send(char data)
+  {
+   if( !(UCSRA & (1<<UDRE)) )
+       {
+            return 0;
+           }
+   else
+       {
+           UDR =data;
+           return 1;
+           }
+  }
+
+		
+void RS485_init(const long baud_rate, const long f_osc)
+{
+	usart_init(baud_rate,f_osc);
+	//dio_init_pin('d',2,1);
+
+}
+
+void rs485_transmit_array(unsigned char *rs485, unsigned char sz)
+{
+	unsigned char *end;
+	end=rs485+sz;
+	//dio_write_pin('d',2,1);
+	while(rs485<=end)
+	{
+		usart_send_byte(*rs485);
+		rs485++;
+	}
+}
+/****************************************/
+unsigned char rs485_receive_array(unsigned char *rs485,unsigned char sz)
+{
+	unsigned char *end;
+	end=rs485+sz;          // sz is the number of items
+	//dio_write_pin('d',2,0);
+	while(rs485<=end)
+	{
+		*rs485=usart_recieve_byte();
+		rs485++;
+	}
+}
+void LCD_command(unsigned char command)
+{
+	LCD_port=(LCD_port & 0x0F) | (command & 0xF0);
+	LCD_port&= ~ (1<<LCD_RS);
+	LCD_port&= ~ (1<<LCD_RW);
+	LCD_port|= (1<<LCD_EN);
+	_delay_us(1);
+	LCD_port&= ~ (1<<LCD_EN);
+	_delay_us(20);
+	LCD_port =(LCD_port & 0x0F) | (command<<4);
+	LCD_port |=(1<<LCD_EN);
+	_delay_us(1);
+	LCD_port&= ~ (1<<LCD_EN);
+}
+
+void LCD_send_Data (unsigned char data)
+{
+	LCD_port = (LCD_port & 0x0F) | (data & 0xF0);
+	LCD_port |= (1<<LCD_RS);
+	LCD_port&= ~ (1<<LCD_RW);
+	LCD_port |= (1<<LCD_EN);
+	_delay_us(1);
+	LCD_port&= ~ (1<<LCD_EN);
+	LCD_port = (LCD_port & 0x0F) | (data<<4);
+	LCD_port|= (1<<LCD_EN);
+	_delay_us(1);
+	LCD_port&= ~ (1<<LCD_EN);
+}
+
+void LCD_init()
+{
+	LCD_DDR=0xFF;
+	
+	LCD_port&= ~ (1<<LCD_EN);
+	_delay_us(2000);
+	LCD_command(0x33);
+	_delay_us(100);
+	LCD_command(0x32);
+	_delay_us(100);
+	LCD_command(0x28);
+	_delay_us(100);
+	LCD_command(0x0e);
+	_delay_us(100);
+	LCD_command(0x01);
+	_delay_us(2000);
+	LCD_command(0x06);
+	_delay_us(100);
+	LCD_command(0x0c);
+}
+
+void LCD_gotoxy(unsigned char x , unsigned char y)
+{
+unsigned char firstcharadr[] = {0x80 , 0xc0 , 0x94 , 0xD4};
+LCD_command(firstcharadr[y-1] + x-1);
+_delay_us(100);
+}
+
+void LCD_print(char *str)
+{
+	unsigned char i=0;
+	while(str[i]!=0)
+	{
+		LCD_send_Data(str[i]);
+		i++;
+	}
+}
+void send_arr(char *ar)
+{
+	int i;
+	for (i=0;i<=(SIZE-1);i++)
+	{
+        usart_send_byte(*ar);
+		_delay_ms(100);
+		ar++;
+	}
+}
+
+void recieve_arr(char *ar)
+{
+	int i;
+	for (i=0;i<=(SIZE-1);i++)
+	{
+        *ar = usart_recieve_byte();
+		_delay_ms(10);
+		ar++;
+	}
+}
+
+void reset_rs485_array()
+{
+	int i;
+	for(i=0;i<=(SIZE-1);i++)
+	{
+		rs485_frame_re1[i]=0x00;
+	}
+}
+void LCD_arr(char *ar)
+{
+	 	int i;
+	for (i=0;i<=(SIZE-1);i++)
+	{
+        LCD_send_Data(*ar);
+		_delay_ms(10);
+		ar++;
+	}
+}
+void send_arr_2_master(char *ar)
+{
+	usart_send_byte(49);
+	int i;
+	for (i=0;i<=(SIZE-1);i++)
+	{
+        usart_send_byte(*ar);
+		_delay_ms(100);
+		ar++;
+	}
+}
+// void send_arr2(char *ar)
+// {
+// 	usart_send_byte('b');
+// 	int i;
+// 	for (i=0;i<=(SIZE-1);i++)
+// 	{
+//         usart_send_byte(*ar);
+// 		_delay_ms(100);
+// 		ar++;
+// 	}
+// }
+void show_result_of_master()
+{
+	char s;
+	do 
+	{
+	  s=usart_recieve_byte();
+	} while (s != 51);
+	
+	rs485_receive_array(rs485_frame_re1,8);
+	LCD_gotoxy(1,1);
+	LCD_arr(rs485_frame_re1);
+	_delay_ms(500);
+	LCD_command(0x01);
+			
+}
+// void show_result2()
+// {
+// 	char s;
+// 	s=usart_recieve_byte();
+// 	if (s =='d')
+// 	{
+// 	rs485_receive_array(rs485_frame_re1,8);
+// 	LCD_gotoxy(1,1);
+// 	LCD_arr(rs485_frame_re1);
+// 	_delay_ms(500);
+// 	LCD_command(0x01);
+// 	}		
+// }
+int main(void)
+{
+	
+	usart_init(9600,8000000);
+	LCD_init();
+	
+    while(1)
+	{
+// 		 reset_rs485_array();
+// 		 rs485_receive_array(rs485_frame_re1,8);
+// 		 LCD_gotoxy(1,1);
+// 		 LCD_arr(rs485_frame_re1);
+// 		 _delay_ms(500);
+// 		 LCD_command(0x01);
+// 		 reset_rs485_array();
+         show_result_of_master();
+		 reset_rs485_array();
+		*rs485_frame_re1 = "Mohamed !";
+		send_arr_2_master(*rs485_frame_re1);
+	//	send_arr(*rs485_frame_re1);
+		
+// 		rs485_receive_array(rs485_frame_re1,8);
+// 		 LCD_gotoxy(1,1);
+// 		LCD_arr(rs485_frame_re1);
+// 		_delay_ms(500);
+// 		LCD_command(0x01);
+
+   }
+	return 0;
+}
